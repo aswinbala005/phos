@@ -1,0 +1,36 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: phos_db
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: dev
+      MINIO_ROOT_PASSWORD: devpassword123
+    volumes:
+      - minio_data:/data
+
+volumes:
+  redis_data:
+  pg_data:
+  minio_data:
