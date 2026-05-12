@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException
 import boto3
 import uuid
 import structlog
-import mimetypes
 from botocore.config import Config
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -30,16 +29,32 @@ async def get_db():
             await session.close()
 
 def get_media_type(s3_key: str) -> str:
-    """Detect if the file is an image or video based on extension."""
+    """Detect if the file is an image or video by checking S3 metadata."""
+    try:
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.S3_ENDPOINT_URL,
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+            config=Config(signature_version="s3v4"),
+        )
+        response = s3.head_object(Bucket=settings.S3_BUCKET_NAME, Key=s3_key)
+        content_type = response.get('ContentType', '')
+        
+        # If the mobile app correctly set the MIME type during upload
+        if content_type.startswith('image/'):
+            return "image"
+        elif content_type.startswith('video/'):
+            return "video"
+    except Exception as e:
+        logger.warning("s3_head_failed", error=str(e), s3_key=s3_key)
+
+    # Fallback to a hardcoded guess or extension if provided
     lower_key = s3_key.lower()
     if any(lower_key.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']):
         return "image"
-    if any(lower_key.endswith(ext) for ext in ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv']):
-        return "video"
     
-    # Fallback to mime type detection
-    mime, _ = mimetypes.guess_type(s3_key)
-    return "image" if mime and mime.startswith('image') else "video"
+    return "video" # Default fallback
 
 @router.post("/", response_model=PresignedURLResponse)
 async def create_upload_job(
@@ -50,20 +65,26 @@ async def create_upload_job(
     user_id = request.user_id if request else None
     s3_key = f"uploads/{job_id}"
 
+    # Create S3 client with INTERNAL endpoint for backend communication
     s3 = boto3.client(
         "s3",
-        endpoint_url=settings.S3_ENDPOINT_URL,
+        endpoint_url=settings.S3_ENDPOINT_URL,  # localhost for backend
         aws_access_key_id=settings.S3_ACCESS_KEY,
         aws_secret_access_key=settings.S3_SECRET_KEY,
         config=Config(signature_version="s3v4"),
     )
 
     try:
+        # Generate presigned POST fields (signature, policy, etc.)
         presigned = s3.generate_presigned_post(
             Bucket=settings.S3_BUCKET_NAME,
             Key=s3_key,
             ExpiresIn=900,
         )
+
+        # ✅ FIX: Manually construct upload_url using EXTERNAL endpoint for mobile app
+        # presigned["url"] contains localhost, so we replace it with the public URL
+        upload_url = f"{settings.MINIO_PUBLIC_URL}/{settings.S3_BUCKET_NAME}"
 
         # Save user_id if provided
         db.add(Job(id=job_id, user_id=user_id, s3_key=s3_key, status="pending"))
@@ -72,7 +93,7 @@ async def create_upload_job(
         logger.info("upload_job_created", job_id=job_id, user_id=user_id, s3_key=s3_key)
         return PresignedURLResponse(
             job_id=job_id,
-            upload_url=presigned["url"],
+            upload_url=upload_url,  # ✅ Now returns http://192.168.1.14:9000/phos-uploads
             fields=presigned["fields"],
         )
     except Exception as e:

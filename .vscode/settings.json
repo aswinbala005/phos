@@ -2,5 +2,9 @@
   "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
   "python.terminal.activateEnvironment": true,
   "editor.formatOnSave": true,
-  "[python]": { "editor.defaultFormatter": "charliermarsh.ruff" }
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
+  "java.configuration.updateBuildConfiguration": "interactive",
+  "java.compile.nullAnalysis.mode": "automatic"
 }
